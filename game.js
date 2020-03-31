@@ -7,107 +7,28 @@ let audioInitialized = false
 
 const smallSprite = 8
 const fontSize = 24
-const lineHeight = 32
-const blankLineCharDelay = 130
+const tileSize = 11
 let wisdom = -1
 
 class Player {
   constructor (x, y) {
-    this.isPlayer = true
     this.pos = { x, y }
     this.vel = { x: 0, y: 0 }
-    this.facingLeft = false
-    this.checkpoints = {}
-    this.trail = []
-    this.megaBird = false
-    this.fireTimer = 0
-    this.refireRate = 20
-    this.ammo = 0
-    this.maxAmmo = 100
-    this.health = 0
-    this.maxHealth = 30
-    this.ammo = this.maxAmmo
-    this.health = this.maxHealth
+    this.speed = 0
+    this.rot = 0
   }
 }
 
-const particleTypes = {
-  playerDeadPuff: { maxAge: 300, sprite: smallSprite + 2 },
-  playerDeadRing: { maxAge: 1, sprite: smallSprite + 2, spawns: [{ type: 'playerDeadPuff', amount: 6, force: 0.75 }, { type: 'playerDeadPuff', amount: 4, force: 0.3 }] },
-  expPuff: { maxAge: 14, sprite: smallSprite + 2 },
-  expRing: { maxAge: 1, sprite: smallSprite + 2, spawns: [{ type: 'expPuff', amount: 4, force: 0.2 }] },
-  spawnerDeadPuff1: { maxAge: 30, sprite: smallSprite + 2 },
-  spawnerDeadPuff2: { maxAge: 90, sprite: smallSprite + 2 },
-  signDeadRing: { maxAge: 1, sprite: smallSprite + 2, spawns: [{ type: 'spawnerDeadPuff1', amount: 8, force: 0.5 }, { type: 'spawnerDeadPuff2', amount: 5, force: 0.3 }] },
-  enemyDeadPuff1: { maxAge: 25, sprite: smallSprite + 2 },
-  enemyDeadPuff2: { maxAge: 30, sprite: smallSprite + 2 },
-  enemyDeadRing: { maxAge: 1, sprite: smallSprite + 2, spawns: [{ type: 'enemyDeadPuff1', amount: 4, force: 1.5 }, { type: 'enemyDeadPuff2', amount: 11, force: 0.5 }] }
-}
-
-let debugMode = false
-window.editMode = false
-
-const storageKey = 'antipatreon-november'
-
-let frame = 0
-let netState = {}
-const shots = []
 const ents = []
-let localId
-
 let player
-
-let spawnerId = 0
-let state = { page: 'intro', active: true, titleCardCharacter: 0 }
-
-const keys = { left: false, right: false, cheat: false, up: false, down: false, shoot: false, shootHit: false }
 
 class Enemy {
   constructor (x, y, parentId = -1) {
     this.pos = { x, y }
     this.vel = { x: 0, y: 0 }
-    this.parentId = parentId
-    this.fireTimer = 0
-    this.refireRate = 0
-    this.facingLeft = false
-    this.fireMode = 'star'
-    this.moveTimer = 0
-    this.maxMoveTimer = 90
-    this.fireSequence = frame % 16
-    this.health = 1
-    this.maxHealth = 1
-    this.sprite = 3
-    this.deadEffect = 'enemyDeadRing'
-    this.hurtsOnTouch = true
   }
   move () {
-    if (this.fireTimer > 0) this.fireTimer--
-    if (this.fireTimer === 0 && this.refireRate > 0) {
-      spawnShot(this)
-      // playSound('enemyshoot')
-      this.fireTimer = this.refireRate
-    }
-    if (!player.dead && this.hurtsOnTouch && isTouching(this, player)) {
-      if (!player.winner) hurt(player, 10)
-      playSound('playerhit')
-      hurt(this, 9000)
-    }
-  }
-  _startRandomMove (chasePlayer) {
-    let angle
-    if (chasePlayer && !player.dead && Math.random() > 0.9) {
-      angle = getAngle(this.pos, player.pos)
-    } else {
-      angle = Math.random() * Math.PI * 2
-    }
 
-    const speed = 0.6
-    this.vel.x = Math.cos(angle) * speed
-    this.vel.y = Math.sin(angle) * speed
-    this.moveTimer = this.maxMoveTimer
-  }
-  inActiveRange () {
-    return distance(this.pos, player.pos) < tileSize * 9
   }
   draw () {
     drawSprite(this.sprite, this.pos.x, this.pos.y)
@@ -117,111 +38,11 @@ class Enemy {
 class OhSpawner extends Enemy {
   constructor (x, y) {
     super(x, y)
-    this.maxSpawnTimer = 15
-    this.spawnTimer = this.maxSpawnTimer
-    this.health = 200
-    this.maxHealth = 200
-    this.deadEffect = 'signDeadRing'
-    this.baseSprite = 3
-    this.hurtsOnTouch = false
-    this.spawnerId = spawnerId++
   }
   spawn () {
     ents.push(new OhRing(this.pos.x, this.pos.y, this.spawnerId))
   }
   move () {
-    this.sprite = this.baseSprite + Math.floor(frame / 15) % 2
-    if (!this.inActiveRange()) {
-      return
-    }
-    if (this.spawnTimer > 0) {
-      this.spawnTimer--
-      if (this.spawnTimer === 0) {
-        this.spawnTimer = this.maxSpawnTimer
-        this.spawn()
-        playSound('spawn')
-        const childCount = ents.filter(e => !e.dead && e.parentId === this.spawnerId).length
-        if (childCount > 5) this.spawnTimer *= 2
-        if (childCount > 12) this.spawnTimer *= 2
-        if (childCount > 20) this.spawnTimer *= 2
-      }
-    }
-    super.move()
-  }
-}
-
-class BatSpawner extends OhSpawner {
-  constructor (x, y) {
-    super(x, y)
-    this.baseSprite = 14
-  }
-  spawn () {
-    ents.push(new BatWing(this.pos.x, this.pos.y, this.spawnerId))
-  }
-}
-
-class SignPost extends Enemy {
-  constructor (x, y, belowIndex) {
-    super(x, y)
-    this.sprite = 4
-    this.hurtsOnTouch = false
-    this.isSign = true
-    this.deadEffect = 'signDeadRing'
-    this.belowIndex = belowIndex
-  }
-  move () {
-    super.move()
-  }
-}
-
-class OhRing extends Enemy {
-  constructor (x, y, sId) {
-    super(x, y, sId)
-    this.refireRate = 120
-    this.fireMode = 'star'
-    this.maxMoveTimer = 90
-    this.trash = true
-    this.health = 10
-    this.maxHealth = 10
-    this.fireTimer = this.refireRate / 2
-  }
-  move () {
-    if (this.moveTimer > 0) {
-      this.moveTimer--
-    } else {
-      this._startRandomMove()
-    }
-    this.pos.x += this.vel.x
-    this.pos.y += this.vel.y
-    if (getCollidingTiles(this.pos)) {
-      this.pos.x -= this.vel.x
-      this.pos.y -= this.vel.y
-      this._startRandomMove()
-    }
-    super.move()
-  }
-}
-
-class BatWing extends Enemy {
-  constructor (x, y, sId) {
-    super(x, y, sId)
-    this.maxMoveTimer = 90
-    this.trash = true
-  }
-  move () {
-    this.sprite = 11 + Math.floor(frame / 6) % 3
-    if (this.moveTimer > 0) {
-      this.moveTimer--
-    } else {
-      this._startRandomMove(true)
-    }
-    this.pos.x += this.vel.x
-    this.pos.y += this.vel.y
-    if (getCollidingTiles(this.pos)) {
-      this.pos.x -= this.vel.x
-      this.pos.y -= this.vel.y
-      this._startRandomMove()
-    }
     super.move()
   }
 }
@@ -230,40 +51,12 @@ const camera = {
   pos: { x: 0, y: 0 }
 }
 
-const checkpoints = [
-]
-
 const particles = []
 
-const skyXVel = 3
-const skyYVel = 2
-
-const xAccel = 0.1
-const xDecel = 0.05
-
 const scale = 4
-const tileSize = 8
 let canvas
 let ctx
 let spriteImage
-
-let savedMap = localStorage.getItem(storageKey)
-let world = savedMap ? JSON.parse(savedMap) : {}
-if (savedMap && false) {
-  console.warn('Loading map from local storage. This is only for development use.')
-} else {
-  world =
-  { 'width': 50, 'height': 50, 'map': [].fill(0, 0, 50 * 50)}
-  for (let i = 0; i < world.width * world.height; i++) {
-    world.map[i] = Math.floor(Math.random() * 2)
-    if (Math.random() > 0.97) {
-      world.map[i] = 2
-    } else if (Math.random() > 0.97) {
-      world.map[i] = 15 // sign
-    }
-  }
-}
-//world.map = editor.rleDecode(world.map)
 
 function start () {
   canvas = document.querySelector('canvas')
@@ -279,50 +72,20 @@ function start () {
 }
 
 function loaded () {
-  editor.startEditor(canvas, scale, world, tileSize, player, storageKey, camera)
   tick()
 }
 
 function tick () {
-  frame = (++frame % 3600)
-  if (state.page === 'intro') {
-    if (frame % 1 === 0) state.titleCardCharacter++
-    if (keys.shootHit) {
-      if (state.active) {
-        state.titleCardCharacter = Number.MAX_SAFE_INTEGER
-      } else {
-        state.page = null
-      }
-    }
-    keys.shootHit = false
-  } else if (state.page === 'endCard') {
-    if (frame % 1 === 0) state.titleCardCharacter++
-    if (keys.shootHit) {
-      if (state.active) {
-        state.titleCardCharacter = Number.MAX_SAFE_INTEGER
-      } else {
-        // You can't advance past this screen
-      }
-    }
-    keys.shootHit = false
-  } else {
-    updatePlayer(player, keys)
-    for (let id in netState) {
-      if (id != localId || debugMode) {
-        updatePlayer(netState[id], false)
-      }
-    }
-    updateShots()
-    updateEnts()
-    updateParticles()
-  }
+  updatePlayer(player)
+  updateEnts()
+  updateParticles()
   draw()
   requestAnimationFrame(tick)
 }
 
 function isTouching (ent1, ent2) {
   // Very dirty hack to handle the player being smaller than other sprites.
-  const dist = (ent1 === player || ent2 === player) ? tileSize / 2 : tileSize
+  const dist = ent1.radius + ent2.radius
   return distance(ent1.pos, ent2.pos) < dist
 }
 
@@ -330,10 +93,6 @@ function distance (pos1, pos2) {
   const dX = pos1.x - pos2.x
   const dY = pos1.y - pos2.y
   return Math.sqrt(dX * dX + dY * dY)
-}
-
-function tilePosToWorld (tilePos) {
-  return { x: tilePos.x * tileSize, y: tilePos.y * tileSize }
 }
 
 function spawnExplosion (pos, type = 'expRing') {
@@ -473,90 +232,18 @@ function filterInPlace (a, condition) {
 }
 
 function draw () {
-  if (state.page === 'intro') {
-    drawIntroCard()
-    return
-  } else if (state.page === 'endCard') {
-    drawEndCard()
-    return
-  }
   ctx.fillStyle = "#4f0064"
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
   drawLevel()
   particles.forEach(p => drawParticle(p, false, true))
-  if (!debugMode) drawPlayer(player)
-  for (let id in netState) {
-    if (id != localId || debugMode) {
-      drawPlayer(netState[id])
-    }
-  }
-  for (let shot of shots) {
-    drawShot(shot)
-  }
+  drawPlayer(player)
+  /*for (let i = 0; i < 1000; i++) {
+    drawSprite(0, Math.random() * 10, Math.random() * 10)
+  }*/
   for (let ent of ents) {
     ent.draw()
   }
-  drawHUD()
-}
-
-function drawHUD () {
-  const height = 60
-  const backgroundColor = ctx.fillStyle
-  ctx.fillRect(0, canvas.height - height - scale, canvas.width, scale)
-  ctx.fillStyle = '#000000'
-  ctx.fillRect(0, canvas.height - height, canvas.width, height)
-  ctx.fillStyle = backgroundColor
-
-  function drawBar (current, max, isLeft, fullSprite, emptySprite) {
-    let x = 420
-    let y = canvas.height - height / 2
-    for (let i = 0; i < max / 10; i++) {
-      const sprite = i < current / 10 ? fullSprite : emptySprite
-      drawSprite(sprite, x, y, false, true)
-      x += tileSize * scale / 2
-    }
-  }
-  // drawBar(player.ammo, player.maxAmmo, true, smallSprite, smallSprite + 1)
-  const sOffset = (player.healthBarFlashTimer > 0 && Math.floor(player.healthBarFlashTimer / 10) % 2 === 0) ? 3 : 3
-  drawBar(player.health, player.maxHealth, false, smallSprite + sOffset + 1, smallSprite + sOffset)
-
-  // Goal text
-  const signsLeft = ents.filter(s => s.isSign).length
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'bottom'
-  const textHeight = canvas.height - (height / 2 - fontSize / 2)
-  ctx.fillText(`Wisdom found: ${initialSignpostCount - signsLeft} of ${initialSignpostCount}.`, tileSize * scale, textHeight)
-  
-  const wisdoms = [
-  `Be so good they can't ignore you`,
-  `Be a fountain, not a drain`,
-  `Confidence is silence`,
-  `All dreams can come true`,
-  `Believe in yourself and others will too`,
-  `What you seek is seeking you`,
-  `It's never too late to change`,
-  `Don't worry about failure`,
-  `Luck comes from hard work`,
-  `Every long journey starts with a small start`,
-  `Don't ask who will let me, ask who will stop me`,
-  `Live this day as if you were leaving tomorrow`,
-  `Life is a daring adventure`,
-  `Give your energy to solutions, not problems`,
-  `What we think about, we become`,
-  `Do more of what works and less of what doesn't`
-  ]
-  if (wisdom >= 0) {
-    const wisIndex = wisdom % wisdoms.length
-    ctx.fillText(wisdoms[wisIndex], 500, textHeight)
-  }
-
-  //hack: logic should not be here in the draw method
-  if (signsLeft === 0 && !player.winner) {
-    player.winner = true
-    player.winTimer = 0
-  }
-
 }
 
 function drawParticle (p) {
@@ -570,18 +257,12 @@ function drawShot (s) {
 }
 
 function drawPlayer (player) {
-  for (let bit of player.trail) {
-    drawCheckpoint(bit, false)
-  }
+  let sprite = 0
+  drawSprite(sprite, player.pos.x, player.pos.y, player.facingLeft, false, player.rot)
 
-  if (!player.dead) {
-    let sprite = 2
-    drawSprite(sprite, player.pos.x, player.pos.y, player.facingLeft)
-    // ctx.strokeText(Math.floor(player.pos.x / tileSize) + ":" + Math.floor(player.pos.y / tileSize), 40, 40)
-  }
 }
 
-function drawSprite (index, x, y, flipped = false, hud = false) {
+function drawSprite (index, x, y, flipped = false, hud = false, rot = 0) {
   let width = tileSize
   let height = tileSize
   if (!hud) {
@@ -592,6 +273,7 @@ function drawSprite (index, x, y, flipped = false, hud = false) {
     y += Math.floor(canvas.height / 2)
   }
   ctx.translate(x, y)
+  ctx.rotate(rot)
   if (flipped) ctx.scale(-1, 1)
 
   let sX = (index % 4) * width
@@ -612,36 +294,13 @@ function drawSprite (index, x, y, flipped = false, hud = false) {
     -width / 2 * scale, -height / 2 * scale,
     width * scale, height * scale)
   if (flipped) ctx.scale(-1, 1)
+  ctx.rotate(-rot)
   ctx.translate(-x, -y)
 }
 
 const hiddenSprites = [15, 16, 17, 2, 8]
 
 function drawLevel () {
-  const level = world.map
-  const center = { x: camera.pos.x / tileSize, y: camera.pos.y / tileSize }
-  const halfWidth = canvas.width / 2 / scale / tileSize
-  const halfHeight = canvas.height / 2 / scale / tileSize
-  const minY = Math.floor(center.y - halfHeight)
-  const maxY = Math.floor(center.y + halfHeight + 1)
-  const minX = Math.floor(center.x - halfWidth)
-  const maxX = Math.floor(center.x + halfWidth + 1)
-  for (let tY = minY; tY < maxY; tY++) {
-    for (let tX = minX; tX < maxX; tX++) {
-      const i = tX + tY * world.width
-      const x = (i % world.width) + 0.5
-      const y = Math.floor(i / world.width) + 0.5
-      const sprite = level[i]
-      if (!window.editMode && hiddenSprites.indexOf(sprite) >= 0) {
-        drawSprite(0, x * tileSize, y * tileSize)
-      } else {
-        drawSprite(sprite, x * tileSize, y * tileSize)
-      }
-    }
-  }
-  for (let checkpoint of checkpoints) {
-    drawCheckpoint({ x: checkpoint.x * tileSize, y: checkpoint.y * tileSize }, player.checkpoints[checkpoint.id])
-  }
 }
 
 function drawCheckpoint (pos, isVacant) {
@@ -675,151 +334,7 @@ function updatePlayerAxis (player, axis, moreKey, lessKey, maxVel) {
 }
 
 function updatePlayer (player, isLocal) {
-  if (player.dead) {
-    if (isLocal) {
-      player.deadTimer = player.deadTimer ? player.deadTimer + 1 : 1
-      if (player.deadTimer > 60 * 3) resetPlayer()
-    }
-    return
-  }
-
-  const keys = player.keys
-  let isTouching = false
-
-  if (keys.left) player.facingLeft = true
-  if (keys.right) player.facingLeft = false
-
-  if (player.winner) {
-    player.winTimer++
-    if (player.winTimer > 60 * 5) {
-      state.page = 'endCard'
-      state.active = true
-      state.titleCardCharacter = 0
-    }
-  }
-
-  if (player.immunity > 0) {
-    player.immunity--
-  }
-
-  updatePlayerAxis(player, 'x', keys.right, keys.left, skyXVel)
-  player.pos.x += player.vel.x
-
-  if (player.pos.x < 0) {
-    player.pos.x = 0
-    player.vel.x = 0
-  }
-  if (player.pos.x > world.width * tileSize) {
-    player.pos.x = world.width * tileSize
-    player.vel.x = 0
-  }
-
-  const collidingTile = getCollidingTiles(player.pos)
-  if (collidingTile !== null) {
-    isTouching = true
-    const clearTileIndex = getIndexFromPixels(collidingTile.x, collidingTile.y) +
-      (player.vel.x < 0 ? 1 : -1) // move player one tile left or right
-    const { x: clearX } = getPixelsFromIndex(clearTileIndex)
-    player.pos.x = clearX + tileSize / 2 * (player.vel.x < 0 ? 0.801 : 1.2)
-    player.vel.x = 0
-  }
-
-  // You can jump if
-  // 1. you are falling
-  // 2. you have ground under your feet
-  // This prevents a case where you step over the edge of a platform and immediately can jump again
-  console.log(isGrounded(player))
-  if (keys.up && isGrounded(player) && player.vel.y >= 0) {
-    player.vel.y = -2.2 // If we ever add slopes, we'd want to preserve vertical speed here sometimes.
-  }
-  player.vel.y += 0.1
-  player.pos.y += player.vel.y
-
-  // falling out of the world
-  if (player.pos.y > (world.height + 10) * tileSize) {
-    player.pos.y = -10 * tileSize
-  }
-
-  const collidingTileY = getCollidingTiles(player.pos)
-  if (collidingTileY !== null) {
-    isTouching = true
-    const clearTileIndex = getIndexFromPixels(collidingTileY.x, collidingTileY.y) +
-      (player.vel.y < 0 ? world.width : -world.width) // move player one tile up or down
-    const { y: clearY } = getPixelsFromIndex(clearTileIndex)
-    player.pos.y = clearY + tileSize / 2 * (player.vel.y < 0 ? 0.801 : 1.2)
-    player.vel.y = 0
-  }
-
-  if (player.fireTimer > 0) player.fireTimer--
-
-  if (isLocal) {
-    if (player.healthBarFlashTimer > 0) {
-      player.healthBarFlashTimer--
-    }
-
-    camera.pos.x = player.pos.x
-    camera.pos.y = player.pos.y
-
-    if (keys.shoot && player.fireTimer === 0 && player.ammo > 0) {
-      spawnShot(player)
-      playSound('shoot')
-      player.fireTimer = player.refireRate
-      // player.ammo--
-    }
-    keys.shootHit = false
-
-    // checkpoints
-    for (let checkpoint of checkpoints) {
-      const close = tileSize * 1.5
-      const dist = distance(player.pos, tilePosToWorld(checkpoint))
-      if (dist < close && !player.checkpoints[checkpoint.id]) {
-        player.checkpoints[checkpoint.id] = true
-        // player.trail.push({ x: checkpoint.x * tileSize, y: checkpoint.y * tileSize, xVel: 0, yVel: 0 })
-
-        player.health = player.maxHealth
-        player.healthBarFlashTimer = 120
-        playSound('heal')
-      }
-    }
-  }
-
-  if (player.lostCoins) {
-    player.checkpoints = {}
-    console.log('coins lost: ' + player.trail.length)
-    for (let bit of player.trail) {
-      particles.push(bit)
-      bit.type = 'expPuff'
-      bit.age = 0
-      bit.xVel *= 2
-      bit.yVel *= 2
-      bit.xVel += (Math.random() - 0.5) * 4
-      bit.yVel += (Math.random() - 0.5) * 4
-    }
-    player.trail.length = 0
-  }
-  delete player.lostCoins
-
-  if (isLocal) {
-    if (player.trail.length > 0) {
-      if (isTouching) {
-        player.lostCoins = true // for network updates
-      }
-    }
-  }
-  if (player.trail.length > 0) {
-    let pos = { ...player.pos }
-    for (let bit of player.trail) {
-      const dist = getDist(bit, pos)
-      const angle = getAngle(bit, pos)
-      const force = 0.1 * dist
-      bit.xVel = force * Math.cos(angle)
-      bit.yVel = force * Math.sin(angle)
-      pos.x = bit.x
-      pos.y = bit.y
-      bit.x += bit.xVel
-      bit.y += bit.yVel
-    }
-  }
+ 
 }
 
 function spawnShot (ent) {
@@ -981,113 +496,40 @@ function getCollidingTiles (pos) {
 
 let initialSignpostCount
 
-function resetPlayer () {
-  player = new Player(2 * tileSize, 2 * tileSize)
-  player.keys = keys 
-  initialSignpostCount = ents.filter(s => s.isSign).length
-}
-
 function restart () {
-  frame = 0
-  shots.length = 0
   ents.length = 0
-  initialSignpostCount = 0
-  // netState
-  player = new Player(2 * tileSize, 2 * tileSize)
-  player.keys = keys
-
-  const level = world.map
-  let cId = 0
-  for (let tY = 0; tY < world.height; tY++) {
-    for (let tX = 0; tX < world.height; tX++) {
-      const i = tX + tY * world.width
-      const x = (i % world.width) + 0.5
-      const y = Math.floor(i / world.width) + 0.5
-      const sprite = level[i]
-      if (sprite === 2) {
-        ents.push(new OhRing(x * tileSize, y * tileSize))
-      }
-      if (sprite === 15) {
-        // signs must have a block underneath them
-        const below = i + world.width
-        if (level[below] === 1) {
-          ents.push(new SignPost(x * tileSize, y * tileSize, below))
-          initialSignpostCount++
-        }
-      }
-    }
-  }
-  console.log(checkpoints)
+  player = new Player(20, 20)
 }
 
 restart()
 
-function cardSetup () {
-  const tileSizePx = tileSize * scale
-  ctx.fillStyle = '#140C1C'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  const pos = { x: tileSizePx * 1.5, y: tileSizePx * 1.5, charLimit: state.titleCardCharacter, char: 0 }
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'top'
-  return pos
+window.addEventListener('mousemove', mouseMove)
+
+function mouseMove(e) {
+  const pos = getMousePos(canvas, e)
+
+  x = Math.floor((x - camPos.x) * scale)
+  y = Math.floor((y - camPos.y) * scale)
+  x += Math.floor(canvas.width / 2)
+  y += Math.floor(canvas.height / 2)
+
+
+  pos.x /= scale
+  pos.y /= scale
+  pos.x += camera.pos.x
+  console.log(pos)
+  console.log(player.pos)
+  player.rot = getAngle(player.pos, pos)
 }
 
-function printCardTip (text) {
-  const tileSizePx = tileSize * scale
-  ctx.textAlign = 'right'
-  ctx.textBaseline = 'bottom'
-  printLine({ x: canvas.width - tileSizePx, y: canvas.height - tileSizePx * 1.5, char: 0, charLimit: 9999 }, text, 'child')
-}
+function  getMousePos(canvas, evt) {
+  if (!canvas) return
+  var rect = canvas.getBoundingClientRect(), // abs. size of element
+      scaleX = canvas.width / rect.width,    // relationship bitmap vs. element for X
+      scaleY = canvas.height / rect.height;  // relationship bitmap vs. element for Y
 
-function drawIntroCard () {
-  const pos = cardSetup()
-  printLine(pos, `COLLECT WISDOM`)
-  printLine(pos, `to win the game`)
-  const hint = (pos.char > pos.charLimit) ? 'Press space bar to skip' : 'Press space bar'
-  state.active = (pos.char > pos.charLimit)
-  printCardTip(hint)
-  // Draw player ship
-  drawSprite(5, canvas.width * 1 / 3, canvas.height * 3 / 4, false, true)
-  drawCardBorder()
-}
-
-function drawCardBorder () {
-  const tileSizePx = tileSize * scale
-  for (let x = 0; x < canvas.width / tileSizePx; x++) {
-    drawSprite(23, (x + 0.5) * tileSizePx, tileSizePx / 2, false, true)
-    drawSprite(23, (x + 0.5) * tileSizePx, canvas.height - tileSizePx / 2, false, true)
-  }
-}
-
-function drawEndCard () {
-  const pos = cardSetup()
-  printLine(pos, `You took all the wisdom`)
-  printLine(pos, ``)
-  printLine(pos, `Now you can leave this brain`)
-  printLine(pos, `and find a new one`)
-  printLine(pos, ``)
-  pos.char += blankLineCharDelay * 2 // Extra delay before the end message
-  state.active = (pos.char > pos.charLimit)
-  if (!state.active) printCardTip('END')
-  drawCardBorder()
-}
-
-function printLine (pos, text, speaker) {
-  if (text) {
-    if (text.includes('\n')) {
-      text.split('\n').forEach(t => printLine(pos, t, speaker))
-      return
-    }
-    ctx.fillStyle = (speaker === 'child') ? '#deeed6' : '#dad45e'
-    ctx.fillText(text.substr(0, pos.charLimit - pos.char), pos.x, pos.y)
-    pos.char += text.length
-    pos.y += lineHeight
-  } else {
-    pos.char += blankLineCharDelay
-    pos.y += lineHeight
-    if (state.page === 'endCard') {
-      // Hack to make the end page fit: blank lines are narrower
-      pos.y -= 2
-    }
+  return {
+    x: (evt.clientX - rect.left) * scaleX,   // scale mouse coordinates after they have
+    y: (evt.clientY - rect.top) * scaleY     // been adjusted to be relative to element
   }
 }
